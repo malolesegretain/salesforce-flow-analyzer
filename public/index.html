@@ -201,7 +201,16 @@
                     <label for="clientSecret" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Consumer Secret:</label>
                     <input type="password" id="clientSecret" name="clientSecret" required 
                            placeholder="Enter your Connected App Consumer Secret"
-                           style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 20px; font-size: 14px;">
+                           style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; font-size: 14px;">
+                </div>
+                
+                <div class="input-group" style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; font-weight: bold; color: #333; cursor: pointer;">
+                        <input type="checkbox" id="isSandbox" name="isSandbox" 
+                               style="margin-right: 8px; transform: scale(1.2);">
+                        Connect to Sandbox Environment
+                    </label>
+                    <small style="color: #666; margin-top: 5px; display: block;">Check this if you're connecting to a sandbox org (test.salesforce.com)</small>
                 </div>
                 
                 <button type="submit" class="login-btn" style="width: 100%;">Login with Salesforce</button>
@@ -274,8 +283,9 @@
                 
                 if (response.ok) {
                     const { sessionId } = await response.json();
-                    // Redirect to auth endpoint with session ID
-                    window.location.href = `/auth/salesforce?sessionId=${sessionId}`;
+                    const isSandbox = document.getElementById('isSandbox').checked;
+                    // Redirect to auth endpoint with session ID and sandbox parameter
+                    window.location.href = `/auth/salesforce?sessionId=${sessionId}&isSandbox=${isSandbox}`;
                 } else {
                     const error = await response.json();
                     alert('Error: ' + error.error);

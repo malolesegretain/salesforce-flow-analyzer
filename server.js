@@ -1022,6 +1022,7 @@ app.post('/auth/set-credentials', (req, res) => {
 // Start OAuth flow
 app.get('/auth/salesforce', (req, res) => {
     const sessionId = req.query.sessionId;
+    const isSandbox = req.query.isSandbox === 'true';
     
     // Use provided credentials or fall back to env
     let clientId, clientSecret;
@@ -1040,20 +1041,26 @@ app.get('/auth/salesforce', (req, res) => {
         return res.status(400).send('No credentials available. Please provide Connected App credentials.');
     }
     
-    // Create OAuth2 client with dynamic credentials
+    // Determine login URL based on environment type
+    const sfLoginUrl = isSandbox ? 
+        (process.env.SALESFORCE_SANDBOX_URL || 'https://test.salesforce.com') : 
+        (process.env.SALESFORCE_LOGIN_URL || 'https://login.salesforce.com');
+    console.log(`Using login URL: ${sfLoginUrl} (sandbox: ${isSandbox})`);
+    
+    // Create OAuth2 client with dynamic credentials and environment-specific URL
     const dynamicOAuth2 = new jsforce.OAuth2({
-        loginUrl: process.env.SALESFORCE_LOGIN_URL || 'https://login.salesforce.com',
+        loginUrl: sfLoginUrl,
         clientId: clientId,
         clientSecret: clientSecret,
         redirectUri: process.env.SALESFORCE_REDIRECT_URI || 'http://localhost:3000/auth/callback'
     });
     
-    const loginUrl = dynamicOAuth2.getAuthorizationUrl({
+    const authUrl = dynamicOAuth2.getAuthorizationUrl({
         scope: 'api refresh_token',
         state: sessionId ? `salesforce-flow-analyzer-${sessionId}` : 'salesforce-flow-analyzer'
     });
     
-    res.redirect(loginUrl);
+    res.redirect(authUrl);
 });
 
 // OAuth callback

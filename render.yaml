@@ -15,6 +15,8 @@ services:
           property: port
       - key: SALESFORCE_LOGIN_URL
         value: https://login.salesforce.com
+      - key: SALESFORCE_SANDBOX_URL
+        value: https://test.salesforce.com
       - key: SALESFORCE_REDIRECT_URI
         sync: false  # This will be set manually in Render dashboard
       - key: SALESFORCE_CLIENT_ID

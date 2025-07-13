@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: salesforce-flow-analyzer
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        fromService:
+          type: web
+          name: salesforce-flow-analyzer
+          property: port
+      - key: SALESFORCE_LOGIN_URL
+        value: https://login.salesforce.com
+      - key: SALESFORCE_REDIRECT_URI
+        sync: false  # This will be set manually in Render dashboard
+      - key: SALESFORCE_CLIENT_ID
+        sync: false  # This will be set manually in Render dashboard  
+      - key: SALESFORCE_CLIENT_SECRET
+        sync: false  # This will be set manually in Render dashboard

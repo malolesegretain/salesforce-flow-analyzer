@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Lead_Required_Fields</fullName>
+    <active>true</active>
+    <description>Ensures Company_Linkedin_URL__c, Linkedin_URL__c, and Website are filled on Lead records</description>
+    <errorConditionFormula>OR(
+        ISBLANK(Company_Linkedin_URL__c),
+        ISBLANK(Linkedin_URL__c),
+        ISBLANK(Website)
+    )</errorConditionFormula>
+    <errorMessage>Company LinkedIn URL, LinkedIn URL, and Website are required fields</errorMessage>
+</ValidationRule>

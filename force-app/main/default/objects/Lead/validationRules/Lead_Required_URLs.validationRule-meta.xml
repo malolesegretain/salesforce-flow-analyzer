@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ValidationRule xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Lead_Required_URLs</fullName>
+    <active>true</active>
+    <description>Ensures that Company LinkedIn URL, Personal LinkedIn URL, and Website fields are populated on Lead records</description>
+    <errorConditionFormula>OR(
+        ISBLANK(Company_Linkedin_URL__c),
+        ISBLANK(Linkedin_URL__c),
+        ISBLANK(Website)
+    )</errorConditionFormula>
+    <errorDisplayField>Company_Linkedin_URL__c</errorDisplayField>
+    <errorMessage>Please ensure that Company LinkedIn URL, Personal LinkedIn URL, and Website fields are all filled in before saving the Lead record.</errorMessage>
+</ValidationRule>

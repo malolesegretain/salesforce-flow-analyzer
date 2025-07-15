@@ -730,6 +730,16 @@
             const activeFlows = allFlows.filter(flow => flow.isActive);
             const inactiveFlows = allFlows.filter(flow => !flow.isActive);
             
+            console.log('🔍 Debugging flow categorization:');
+            console.log('Total flows:', allFlows.length);
+            console.log('Active flows:', activeFlows.length);
+            console.log('Inactive flows:', inactiveFlows.length);
+            
+            // Debug first few flows
+            allFlows.slice(0, 5).forEach(flow => {
+                console.log(`Flow: ${flow.MasterLabel}, Status: ${flow.Status}, isActive: ${flow.isActive}`);
+            });
+            
             // Update headers
             document.getElementById('activeFlowsHeader').textContent = `Active Flows (${activeFlows.length})`;
             document.getElementById('inactiveFlowsHeader').textContent = `Inactive Flows (${inactiveFlows.length})`;

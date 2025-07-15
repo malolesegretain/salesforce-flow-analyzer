@@ -859,7 +859,6 @@ async function getFlowsData() {
     const basicFlowQuery = `
         SELECT Id, MasterLabel, Status, ProcessType, TriggerOrder, LastModifiedDate, Description 
         FROM Flow 
-        WHERE Status IN ('Active', 'Draft', 'Obsolete')
         ORDER BY Status DESC, MasterLabel ASC
     `;
     
@@ -870,6 +869,13 @@ async function getFlowsData() {
     const inactiveFlows = basicFlows.filter(flow => flow.Status !== 'Active');
     
     console.log(`📊 Found ${basicFlows.length} total flows to process (${activeFlows.length} active, ${inactiveFlows.length} inactive)`);
+    
+    // Debug flow statuses
+    const statusCounts = {};
+    basicFlows.forEach(flow => {
+        statusCounts[flow.Status] = (statusCounts[flow.Status] || 0) + 1;
+    });
+    console.log('📈 Flow statuses found:', statusCounts);
     
     // Now get detailed metadata for each flow using ID (like extract_flows.sh does)
     for (let i = 0; i < basicFlows.length; i++) {

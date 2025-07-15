@@ -670,6 +670,7 @@
                 }
                 
                 flowsData = await flowResponse.json();
+                console.log('✅ Flows data retrieved successfully:', flowsData);
                 
                 // Get instance URL for flow links
                 if (instanceResponse.ok) {
@@ -681,7 +682,17 @@
                 }
                 
                 // Show flow selection screen instead of immediately starting analysis
-                showFlowSelectionScreen();
+                console.log('🚀 About to show flow selection screen...');
+                try {
+                    showFlowSelectionScreen();
+                    console.log('✅ Flow selection screen shown successfully');
+                } catch (selectionError) {
+                    console.error('❌ Error showing flow selection screen:', selectionError);
+                    // Fallback to welcome screen
+                    setLoadingState(false);
+                    document.getElementById('welcome').style.display = 'block';
+                    document.getElementById('message').innerHTML = '<div class="error">❌ Error showing flow selection: ' + selectionError.message + '</div>';
+                }
                 
             } catch (error) {
                 setLoadingState(false);
@@ -696,6 +707,9 @@
         let allFlows = [];
         
         function showFlowSelectionScreen() {
+            console.log('🔄 Showing flow selection screen...');
+            console.log('📊 Flows data:', flowsData);
+            
             setLoadingState(false);
             document.getElementById('welcome').style.display = 'none';
             document.getElementById('flowSelection').style.display = 'block';
@@ -705,6 +719,8 @@
             // Populate flows
             allFlows = flowsData.flows || [];
             selectedFlows = [];
+            
+            console.log(`📋 Found ${allFlows.length} total flows`);
             
             populateFlowLists();
             setupFlowSelectionEvents();
@@ -949,12 +965,14 @@
             const welcome = document.getElementById('welcome');
             const results = document.getElementById('results');
             const aiResults = document.getElementById('aiResults');
+            const flowSelection = document.getElementById('flowSelection');
             
             if (isLoading) {
                 loading.style.display = 'block';
                 welcome.style.display = 'none';
                 results.style.display = 'none';
                 aiResults.style.display = 'none';
+                flowSelection.style.display = 'none';
                 loadingText.textContent = text;
                 disableAllButtons(true);
             } else {

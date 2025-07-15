@@ -1293,6 +1293,10 @@ app.post('/api/flows/ai-analysis', async (req, res) => {
             console.log('API 520 error details:', JSON.stringify(error.response?.data, null, 2));
             errorMessage = 'Server connection error. This may be due to a large dataset or network timeout. Try analyzing smaller groups of flows.';
             statusCode = 520;
+        } else if (error.response?.status === 502) {
+            console.log('API 502 error details:', JSON.stringify(error.response?.data, null, 2));
+            errorMessage = 'Service temporarily unavailable. This may be a Render infrastructure issue. Please try again in a few minutes.';
+            statusCode = 502;
         }
         
         res.status(statusCode).json({ 

@@ -114,10 +114,10 @@ async function callClaude(apiKey, prompt, retryCount = 0) {
         console.log(`Claude API error: ${error.response?.status} - ${error.response?.data?.error?.message || error.message}`);
         console.log(`Request payload size: ${prompt.length} characters`);
         
-        // Retry on 529 (overloaded) errors
-        if (error.response?.status === 529 && retryCount < 2) {
-            const waitTime = Math.pow(2, retryCount) * 2000; // 2s, 4s exponential backoff
-            console.log(`Claude API overloaded, retrying in ${waitTime}ms (attempt ${retryCount + 1}/3)`);
+        // Retry on 529 (overloaded) errors with more aggressive backoff
+        if (error.response?.status === 529 && retryCount < 4) {
+            const waitTime = Math.pow(2, retryCount) * 3000; // 3s, 6s, 12s, 24s exponential backoff
+            console.log(`Claude API overloaded, retrying in ${waitTime}ms (attempt ${retryCount + 1}/5)`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
             return callClaude(apiKey, prompt, retryCount + 1);
         }
@@ -375,7 +375,7 @@ async function performChunkedAnalysis(provider, apiKey, flowsData) {
     
     let currentChunk = [];
     let currentChunkSize = 0;
-    const maxChunkSize = 15000; // Conservative limit to avoid API issues
+    const maxChunkSize = 12000; // Ultra-conservative limit to avoid 529 errors
     
     for (const { flow, estimatedSize } of flowsBySize) {
         // If adding this flow would exceed limit, start new chunk
@@ -467,8 +467,8 @@ ${JSON.stringify(chunkData)}`;
             
             // Add longer delay between chunks to avoid API overload
             if (i < chunks.length - 1) {
-                console.log(`Waiting 3 seconds before next chunk...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                console.log(`Waiting 5 seconds before next chunk...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
             }
             
         } catch (error) {

@@ -854,18 +854,22 @@ async function getFlowsData() {
     // Get detailed metadata for each flow using Tooling API (following extract_flows.sh logic)
     const flowDetails = [];
     
-    // First, get all active Flow IDs using the basic query (like the script does)
+    // First, get all Flow IDs (both active and inactive) using the basic query
     console.log("📋 Getting basic flow information...");
     const basicFlowQuery = `
         SELECT Id, MasterLabel, Status, ProcessType, TriggerOrder, LastModifiedDate, Description 
         FROM Flow 
-        WHERE Status = 'Active'
+        WHERE Status IN ('Active', 'Draft', 'Obsolete')
+        ORDER BY Status DESC, MasterLabel ASC
     `;
     
     const basicFlowsResult = await conn.tooling.query(basicFlowQuery);
     const basicFlows = basicFlowsResult.records || [];
     
-    console.log(`📊 Found ${basicFlows.length} active flows to process`);
+    const activeFlows = basicFlows.filter(flow => flow.Status === 'Active');
+    const inactiveFlows = basicFlows.filter(flow => flow.Status !== 'Active');
+    
+    console.log(`📊 Found ${basicFlows.length} total flows to process (${activeFlows.length} active, ${inactiveFlows.length} inactive)`);
     
     // Now get detailed metadata for each flow using ID (like extract_flows.sh does)
     for (let i = 0; i < basicFlows.length; i++) {
@@ -907,7 +911,8 @@ async function getFlowsData() {
                     TriggerOrder: flowRecord.TriggerOrder,
                     ApiVersion: flowRecord.ApiVersion,
                     LastModifiedDate: flowRecord.LastModifiedDate,
-                    Description: flowRecord.Description
+                    Description: flowRecord.Description,
+                    isActive: flowRecord.Status === 'Active'
                 };
                 
                 flowDetails.push(completeFlowRecord);
@@ -929,6 +934,7 @@ async function getFlowsData() {
                     LastModifiedDate: basicFlow.LastModifiedDate,
                     Description: basicFlow.Description,
                     Metadata: {},
+                    isActive: basicFlow.Status === 'Active',
                     error: 'Could not fetch detailed metadata'
                 });
             }
@@ -953,17 +959,23 @@ async function getFlowsData() {
                 LastModifiedDate: basicFlow.LastModifiedDate,
                 Description: basicFlow.Description,
                 Metadata: {},
+                isActive: basicFlow.Status === 'Active',
                 error: flowError.message
             });
         }
     }
 
+    const finalActiveFlows = flowDetails.filter(flow => flow.isActive);
+    const finalInactiveFlows = flowDetails.filter(flow => !flow.isActive);
+    
     return {
         metadata: {
             retrievedAt: new Date().toISOString(),
             orgAlias: connectionInfo.instanceUrl.replace('https://', '').split('.')[0],
             orgUsername: connectionInfo.userInfo.username || 'Unknown',
             totalFlows: flowDetails.length,
+            activeFlows: finalActiveFlows.length,
+            inactiveFlows: finalInactiveFlows.length,
             source: "Salesforce Flow Analyzer Tool"
         },
         flows: flowDetails

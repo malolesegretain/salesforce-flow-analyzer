@@ -1289,6 +1289,10 @@ app.post('/api/flows/ai-analysis', async (req, res) => {
             console.log('API 529 overloaded error details:', JSON.stringify(error.response?.data, null, 2));
             errorMessage = 'AI service is temporarily overloaded. Please wait a moment and try again.';
             statusCode = 529;
+        } else if (error.response?.status === 520) {
+            console.log('API 520 error details:', JSON.stringify(error.response?.data, null, 2));
+            errorMessage = 'Server connection error. This may be due to a large dataset or network timeout. Try analyzing smaller groups of flows.';
+            statusCode = 520;
         }
         
         res.status(statusCode).json({ 

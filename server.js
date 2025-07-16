@@ -870,13 +870,6 @@ async function getFlowsData() {
     
     console.log(`📊 Found ${basicFlows.length} total flows to process (${activeFlows.length} active, ${inactiveFlows.length} inactive)`);
     
-    // Debug flow statuses
-    const statusCounts = {};
-    basicFlows.forEach(flow => {
-        statusCounts[flow.Status] = (statusCounts[flow.Status] || 0) + 1;
-    });
-    console.log('📈 Flow statuses found:', statusCounts);
-    
     // Now get detailed metadata for each flow using ID (like extract_flows.sh does)
     for (let i = 0; i < basicFlows.length; i++) {
         const basicFlow = basicFlows[i];
@@ -971,21 +964,246 @@ async function getFlowsData() {
         }
     }
 
-    const finalActiveFlows = flowDetails.filter(flow => flow.isActive);
-    const finalInactiveFlows = flowDetails.filter(flow => !flow.isActive);
+    // Filter to keep only the latest version of each flow
+    const latestFlows = filterToLatestVersions(flowDetails);
+    
+    const finalActiveFlows = latestFlows.filter(flow => flow.isActive);
+    const finalInactiveFlows = latestFlows.filter(flow => !flow.isActive);
     
     return {
         metadata: {
             retrievedAt: new Date().toISOString(),
             orgAlias: connectionInfo.instanceUrl.replace('https://', '').split('.')[0],
             orgUsername: connectionInfo.userInfo.username || 'Unknown',
-            totalFlows: flowDetails.length,
+            totalFlows: latestFlows.length,
             activeFlows: finalActiveFlows.length,
             inactiveFlows: finalInactiveFlows.length,
             source: "Salesforce Flow Analyzer Tool"
         },
-        flows: flowDetails
+        flows: latestFlows
     };
+}
+
+// Enhanced getFlowsData with progress updates via Server-Sent Events
+async function getFlowsDataWithProgress(res) {
+    const conn = new jsforce.Connection({
+        instanceUrl: connectionInfo.instanceUrl,
+        accessToken: connectionInfo.accessToken
+    });
+
+    const flowDetails = [];
+    
+    // Send initial progress update
+    res.write(`data: ${JSON.stringify({ type: 'progress', message: 'Getting basic flow information...', percent: 0 })}\n\n`);
+    
+    // First, get all Flow IDs (both active and inactive) using the basic query
+    console.log("📋 Getting basic flow information...");
+    const basicFlowQuery = `
+        SELECT Id, MasterLabel, Status, ProcessType, TriggerOrder, LastModifiedDate, Description 
+        FROM Flow 
+        ORDER BY Status DESC, MasterLabel ASC
+    `;
+    
+    const basicFlowsResult = await conn.tooling.query(basicFlowQuery);
+    const basicFlows = basicFlowsResult.records || [];
+    
+    const activeFlows = basicFlows.filter(flow => flow.Status === 'Active');
+    const inactiveFlows = basicFlows.filter(flow => flow.Status !== 'Active');
+    
+    console.log(`📊 Found ${basicFlows.length} total flows to process (${activeFlows.length} active, ${inactiveFlows.length} inactive)`);
+    
+    // Send progress update with flow count
+    res.write(`data: ${JSON.stringify({ 
+        type: 'progress', 
+        message: `Found ${basicFlows.length} flows (${activeFlows.length} active, ${inactiveFlows.length} inactive). Processing metadata...`, 
+        percent: 10,
+        total: basicFlows.length,
+        current: 0
+    })}\n\n`);
+    
+    // Now get detailed metadata for each flow with progress updates
+    for (let i = 0; i < basicFlows.length; i++) {
+        const basicFlow = basicFlows[i];
+        const percent = Math.round(10 + (i / basicFlows.length) * 80); // 10% to 90%
+        
+        // Send progress update for each flow
+        res.write(`data: ${JSON.stringify({ 
+            type: 'progress', 
+            message: `Processing flow ${i + 1}/${basicFlows.length}: ${basicFlow.MasterLabel || basicFlow.Id}`, 
+            percent: percent,
+            total: basicFlows.length,
+            current: i + 1
+        })}\n\n`);
+        
+        try {
+            console.log(`⏳ [${i + 1}/${basicFlows.length}] Processing flow: ${basicFlow.MasterLabel || basicFlow.Id}`);
+            
+            // Use direct REST API call to get complete metadata
+            const detailedFlowQuery = `SELECT Id, FullName, MasterLabel, Status, ProcessType, Metadata, TriggerOrder, ApiVersion, LastModifiedDate, Description FROM Flow WHERE Id = '${basicFlow.Id}'`;
+            
+            const apiUrl = `${connectionInfo.instanceUrl}/services/data/v64.0/tooling/query/?q=${encodeURIComponent(detailedFlowQuery)}`;
+            
+            const response = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${connectionInfo.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const detailedFlowResult = await response.json();
+            
+            if (detailedFlowResult.records && detailedFlowResult.records.length > 0) {
+                const flowRecord = detailedFlowResult.records[0];
+                console.log(`   ✅ Success - ProcessType: ${flowRecord.ProcessType}, ApiVersion: ${flowRecord.ApiVersion}`);
+                
+                // Extract complete flow record with all metadata preserved
+                const completeFlowRecord = {
+                    attributes: {
+                        type: "Flow",
+                        url: `/services/data/v64.0/tooling/sobjects/Flow/${flowRecord.Id}`
+                    },
+                    Id: flowRecord.Id,
+                    FullName: flowRecord.FullName,
+                    MasterLabel: flowRecord.MasterLabel,
+                    Status: flowRecord.Status,
+                    ProcessType: flowRecord.ProcessType,
+                    Metadata: flowRecord.Metadata,
+                    TriggerOrder: flowRecord.TriggerOrder,
+                    ApiVersion: flowRecord.ApiVersion,
+                    LastModifiedDate: flowRecord.LastModifiedDate,
+                    Description: flowRecord.Description,
+                    isActive: flowRecord.Status === 'Active'
+                };
+                
+                flowDetails.push(completeFlowRecord);
+            } else {
+                console.log(`   ❌ Failed to get detailed metadata`);
+                // Add basic info with error
+                flowDetails.push({
+                    attributes: {
+                        type: "Flow",
+                        url: `/services/data/v64.0/tooling/sobjects/Flow/${basicFlow.Id}`
+                    },
+                    Id: basicFlow.Id,
+                    FullName: 'Unknown',
+                    MasterLabel: basicFlow.MasterLabel,
+                    Status: basicFlow.Status,
+                    ProcessType: basicFlow.ProcessType,
+                    TriggerOrder: basicFlow.TriggerOrder,
+                    ApiVersion: null,
+                    LastModifiedDate: basicFlow.LastModifiedDate,
+                    Description: basicFlow.Description,
+                    Metadata: {},
+                    isActive: basicFlow.Status === 'Active',
+                    error: 'Could not fetch detailed metadata'
+                });
+            }
+            
+            // Pause to avoid API limits
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+        } catch (flowError) {
+            console.error(`   ❌ Error processing flow ${basicFlow.Id}:`, flowError.message);
+            flowDetails.push({
+                attributes: {
+                    type: "Flow",
+                    url: `/services/data/v64.0/tooling/sobjects/Flow/${basicFlow.Id}`
+                },
+                Id: basicFlow.Id,
+                FullName: 'Unknown',
+                MasterLabel: basicFlow.MasterLabel,
+                Status: basicFlow.Status,
+                ProcessType: basicFlow.ProcessType,
+                TriggerOrder: basicFlow.TriggerOrder,
+                ApiVersion: null,
+                LastModifiedDate: basicFlow.LastModifiedDate,
+                Description: basicFlow.Description,
+                Metadata: {},
+                isActive: basicFlow.Status === 'Active',
+                error: flowError.message
+            });
+        }
+    }
+
+    // Send final progress update
+    res.write(`data: ${JSON.stringify({ 
+        type: 'progress', 
+        message: 'Filtering to latest versions only...', 
+        percent: 95,
+        total: basicFlows.length,
+        current: basicFlows.length
+    })}\n\n`);
+
+    // Filter to keep only the latest version of each flow
+    const latestFlows = filterToLatestVersions(flowDetails);
+    
+    const finalActiveFlows = latestFlows.filter(flow => flow.isActive);
+    const finalInactiveFlows = latestFlows.filter(flow => !flow.isActive);
+    
+    console.log(`📊 After filtering: ${latestFlows.length} flows (${finalActiveFlows.length} active, ${finalInactiveFlows.length} inactive)`);
+    
+    const result = {
+        metadata: {
+            retrievedAt: new Date().toISOString(),
+            orgAlias: connectionInfo.instanceUrl.replace('https://', '').split('.')[0],
+            orgUsername: connectionInfo.userInfo.username || 'Unknown',
+            totalFlows: latestFlows.length,
+            activeFlows: finalActiveFlows.length,
+            inactiveFlows: finalInactiveFlows.length,
+            source: "Salesforce Flow Analyzer Tool"
+        },
+        flows: latestFlows
+    };
+    
+    return result;
+}
+
+// Helper function to filter flows to only the latest version of each flow
+function filterToLatestVersions(flowDetails) {
+    console.log(`🔍 Filtering ${flowDetails.length} flows to latest versions only...`);
+    
+    // Group flows by MasterLabel
+    const flowGroups = {};
+    
+    flowDetails.forEach(flow => {
+        const key = flow.MasterLabel || flow.FullName;
+        if (!flowGroups[key]) {
+            flowGroups[key] = [];
+        }
+        flowGroups[key].push(flow);
+    });
+    
+    // For each group, keep only the latest version
+    const latestFlows = [];
+    
+    Object.keys(flowGroups).forEach(flowName => {
+        const versions = flowGroups[flowName];
+        
+        if (versions.length === 1) {
+            latestFlows.push(versions[0]);
+        } else {
+            // Sort by LastModifiedDate (newest first) and take the first one
+            const sortedVersions = versions.sort((a, b) => {
+                const dateA = new Date(a.LastModifiedDate || 0);
+                const dateB = new Date(b.LastModifiedDate || 0);
+                return dateB - dateA;
+            });
+            
+            // Prefer active version if available, otherwise take the newest
+            let latestVersion = sortedVersions[0];
+            const activeVersion = sortedVersions.find(v => v.isActive);
+            if (activeVersion) {
+                latestVersion = activeVersion;
+            }
+            
+            console.log(`   📝 ${flowName}: ${versions.length} versions → keeping ${latestVersion.Status} version (${latestVersion.LastModifiedDate})`);
+            latestFlows.push(latestVersion);
+        }
+    });
+    
+    console.log(`✅ Filtered from ${flowDetails.length} to ${latestFlows.length} flows`);
+    return latestFlows;
 }
 
 // OAuth Configuration
@@ -1185,6 +1403,63 @@ app.get('/api/flows', async (req, res) => {
         console.error('Error fetching flows:', error);
         res.status(500).json({ error: 'Failed to fetch flows: ' + error.message });
     }
+});
+
+// Server-Sent Events endpoint for flow retrieval progress
+app.get('/api/flows/progress', (req, res) => {
+    if (!connectionInfo.accessToken) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+    
+    // Set up Server-Sent Events with additional headers for production
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control',
+        'X-Accel-Buffering': 'no', // Disable nginx buffering
+        'Access-Control-Allow-Methods': 'GET',
+        'Access-Control-Max-Age': '86400'
+    });
+    
+    // Send initial keepalive message to establish connection
+    res.write(`data: ${JSON.stringify({ type: 'init', message: 'Connection established' })}\n\n`);
+    
+    // Set up periodic heartbeat to keep connection alive
+    const heartbeatInterval = setInterval(() => {
+        if (!res.finished) {
+            res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`);
+        }
+    }, 30000); // 30 seconds
+    
+    // Handle client disconnect
+    req.on('close', () => {
+        console.log('Client disconnected from progress stream');
+        clearInterval(heartbeatInterval);
+    });
+    
+    req.on('error', (error) => {
+        console.error('SSE request error:', error);
+        clearInterval(heartbeatInterval);
+    });
+    
+    // Start the flow retrieval process with progress updates
+    getFlowsDataWithProgress(res).then(flowsData => {
+        if (!res.finished) {
+            // Send final result
+            res.write(`data: ${JSON.stringify({ type: 'complete', data: flowsData })}\n\n`);
+            clearInterval(heartbeatInterval);
+            res.end();
+        }
+    }).catch(error => {
+        console.error('Error in progress flow retrieval:', error);
+        if (!res.finished) {
+            res.write(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`);
+            clearInterval(heartbeatInterval);
+            res.end();
+        }
+    });
 });
 
 // Get Salesforce instance URL for flow links

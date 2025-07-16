@@ -93,6 +93,65 @@
         .spinner-dot:nth-child(5) { top: 36px; left: 0; animation-delay: 0.32s; }
         .spinner-dot:nth-child(6) { top: 12px; left: 0; animation-delay: 0.48s; }
         
+        .progress-container {
+            margin: 20px 0;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #1976d2, #42a5f5);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+            position: relative;
+        }
+        
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shimmer 2s infinite;
+        }
+        
+        .progress-text {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .progress-percent {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+        
+        .progress-details {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
         @keyframes spinner-bounce {
             0%, 80%, 100% { 
                 transform: scale(0.8);
@@ -489,6 +548,15 @@
                 <div class="spinner-dot"></div>
             </div>
             <p id="loadingText">Analyzing flows... This may take a few minutes.</p>
+            
+            <div id="progressContainer" class="progress-container" style="display: none;">
+                <div class="progress-percent" id="progressPercent">0%</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-text" id="progressText">Starting...</div>
+                <div class="progress-details" id="progressDetails"></div>
+            </div>
         </div>
 
         <div id="welcome" class="welcome">
@@ -659,40 +727,73 @@
             setLoadingState(true, 'Retrieving flow data from Salesforce...');
             
             try {
-                // First get flow data and instance URL
-                const [flowResponse, instanceResponse] = await Promise.all([
-                    fetch('/api/flows'),
-                    fetch('/api/instance')
-                ]);
-                
-                if (!flowResponse.ok) {
-                    throw new Error(`HTTP error! status: ${flowResponse.status}`);
+                // First check if we're authenticated by testing a simple endpoint
+                const authCheck = await fetch('/api/org-info');
+                if (!authCheck.ok) {
+                    throw new Error('Please login to Salesforce first');
                 }
                 
-                flowsData = await flowResponse.json();
-                console.log('✅ Flows data retrieved successfully:', flowsData);
+                // Use the new progress endpoint with Server-Sent Events
+                const eventSource = new EventSource('/api/flows/progress');
                 
-                // Get instance URL for flow links
-                if (instanceResponse.ok) {
-                    const instanceData = await instanceResponse.json();
-                    salesforceInstanceUrl = instanceData.instanceUrl;
-                    console.log('Salesforce instance URL retrieved:', salesforceInstanceUrl);
-                } else {
-                    console.log('Failed to get instance URL:', instanceResponse.status);
-                }
+                // Show progress container
+                document.getElementById('progressContainer').style.display = 'block';
                 
-                // Show flow selection screen instead of immediately starting analysis
-                console.log('🚀 About to show flow selection screen...');
-                try {
-                    showFlowSelectionScreen();
-                    console.log('✅ Flow selection screen shown successfully');
-                } catch (selectionError) {
-                    console.error('❌ Error showing flow selection screen:', selectionError);
-                    // Fallback to welcome screen
-                    setLoadingState(false);
-                    document.getElementById('welcome').style.display = 'block';
-                    document.getElementById('message').innerHTML = '<div class="error">❌ Error showing flow selection: ' + selectionError.message + '</div>';
-                }
+                // Set up timeout for SSE connection (5 minutes)
+                const sseTimeout = setTimeout(() => {
+                    console.log('SSE connection timed out, falling back to regular API');
+                    eventSource.close();
+                    
+                    // Fallback to regular API
+                    fallbackToRegularAPI();
+                }, 5 * 60 * 1000); // 5 minutes
+                
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'init') {
+                        console.log('SSE connection established:', data.message);
+                    } else if (data.type === 'heartbeat') {
+                        console.log('SSE heartbeat received');
+                    } else if (data.type === 'progress') {
+                        updateProgressBar(data.percent, data.message, data.current, data.total);
+                    } else if (data.type === 'complete') {
+                        clearTimeout(sseTimeout);
+                        eventSource.close();
+                        flowsData = data.data;
+                        
+                        // Get instance URL for flow links
+                        fetch('/api/instance')
+                            .then(response => response.ok ? response.json() : null)
+                            .then(instanceData => {
+                                if (instanceData) {
+                                    salesforceInstanceUrl = instanceData.instanceUrl;
+                                    console.log('Salesforce instance URL retrieved:', salesforceInstanceUrl);
+                                }
+                            })
+                            .catch(error => console.log('Failed to get instance URL:', error));
+                        
+                        // Show flow selection screen
+                        showFlowSelectionScreen();
+                        
+                    } else if (data.type === 'error') {
+                        clearTimeout(sseTimeout);
+                        eventSource.close();
+                        setLoadingState(false);
+                        document.getElementById('welcome').style.display = 'block';
+                        document.getElementById('message').innerHTML = '<div class="error">❌ Error: ' + data.message + '</div>';
+                        console.error('Error:', data.message);
+                    }
+                };
+                
+                eventSource.onerror = function(event) {
+                    console.error('EventSource failed:', event);
+                    clearTimeout(sseTimeout);
+                    eventSource.close();
+                    
+                    // Fallback to regular API
+                    fallbackToRegularAPI();
+                };
                 
             } catch (error) {
                 setLoadingState(false);
@@ -701,15 +802,54 @@
                 console.error('Error:', error);
             }
         }
+        
+        function fallbackToRegularAPI() {
+            // Fallback to the original API endpoint without progress
+            console.log('Falling back to original API endpoint...');
+            setLoadingState(true, 'Retrieving flow data from Salesforce...');
+            
+            // Hide progress container since we're falling back
+            document.getElementById('progressContainer').style.display = 'none';
+            
+            // Use the original flow retrieval method
+            Promise.all([
+                fetch('/api/flows'),
+                fetch('/api/instance')
+            ])
+            .then(([flowResponse, instanceResponse]) => {
+                if (!flowResponse.ok) {
+                    throw new Error(`HTTP error! status: ${flowResponse.status}`);
+                }
+                
+                return Promise.all([
+                    flowResponse.json(),
+                    instanceResponse.ok ? instanceResponse.json() : null
+                ]);
+            })
+            .then(([flowsDataResult, instanceData]) => {
+                flowsData = flowsDataResult;
+                
+                if (instanceData) {
+                    salesforceInstanceUrl = instanceData.instanceUrl;
+                    console.log('Salesforce instance URL retrieved:', salesforceInstanceUrl);
+                }
+                
+                // Show flow selection screen
+                showFlowSelectionScreen();
+            })
+            .catch(error => {
+                setLoadingState(false);
+                document.getElementById('welcome').style.display = 'block';
+                document.getElementById('message').innerHTML = '<div class="error">❌ Error: ' + error.message + '</div>';
+                console.error('Error:', error);
+            });
+        }
 
         // Flow Selection Functions
         let selectedFlows = [];
         let allFlows = [];
         
         function showFlowSelectionScreen() {
-            console.log('🔄 Showing flow selection screen...');
-            console.log('📊 Flows data:', flowsData);
-            
             setLoadingState(false);
             document.getElementById('welcome').style.display = 'none';
             document.getElementById('flowSelection').style.display = 'block';
@@ -720,8 +860,6 @@
             allFlows = flowsData.flows || [];
             selectedFlows = [];
             
-            console.log(`📋 Found ${allFlows.length} total flows`);
-            
             populateFlowLists();
             setupFlowSelectionEvents();
         }
@@ -729,16 +867,6 @@
         function populateFlowLists() {
             const activeFlows = allFlows.filter(flow => flow.isActive);
             const inactiveFlows = allFlows.filter(flow => !flow.isActive);
-            
-            console.log('🔍 Debugging flow categorization:');
-            console.log('Total flows:', allFlows.length);
-            console.log('Active flows:', activeFlows.length);
-            console.log('Inactive flows:', inactiveFlows.length);
-            
-            // Debug first few flows
-            allFlows.slice(0, 5).forEach(flow => {
-                console.log(`Flow: ${flow.MasterLabel}, Status: ${flow.Status}, isActive: ${flow.isActive}`);
-            });
             
             // Update headers
             document.getElementById('activeFlowsHeader').textContent = `Active Flows (${activeFlows.length})`;
@@ -976,6 +1104,7 @@
             const results = document.getElementById('results');
             const aiResults = document.getElementById('aiResults');
             const flowSelection = document.getElementById('flowSelection');
+            const progressContainer = document.getElementById('progressContainer');
             
             if (isLoading) {
                 loading.style.display = 'block';
@@ -987,9 +1116,27 @@
                 disableAllButtons(true);
             } else {
                 loading.style.display = 'none';
+                progressContainer.style.display = 'none';
                 disableAllButtons(false);
                 // Enable export buttons
                 document.getElementById('exportBtn').disabled = false;
+            }
+        }
+
+        function updateProgressBar(percent, message, current, total) {
+            const progressPercent = document.getElementById('progressPercent');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            const progressDetails = document.getElementById('progressDetails');
+            
+            progressPercent.textContent = percent + '%';
+            progressFill.style.width = percent + '%';
+            progressText.textContent = message;
+            
+            if (current !== undefined && total !== undefined) {
+                progressDetails.textContent = `Processing ${current} of ${total} flows`;
+            } else {
+                progressDetails.textContent = '';
             }
         }
 

@@ -61,6 +61,13 @@
         .btn-danger:hover {
             background: #c62828;
         }
+        .btn-success {
+            background: #4caf50;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #45a049;
+        }
         .main-content {
             background: white;
             padding: 30px;
@@ -218,6 +225,65 @@
             background: #1565c0;
         }
         .chat-send:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* Flow Interaction Interface Styles */
+        .flow-interaction-interface {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f0f8ff;
+            border-radius: 8px;
+            border-left: 4px solid #4caf50;
+        }
+        .interaction-header {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .interaction-header h2 {
+            color: #4caf50;
+            margin: 0;
+            font-size: 24px;
+        }
+        .interaction-header p {
+            color: #666;
+            margin: 5px 0 0 0;
+            font-size: 14px;
+        }
+        .interaction-messages {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        .interaction-input-container {
+            display: flex;
+            gap: 10px;
+        }
+        .interaction-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .interaction-send {
+            padding: 10px 20px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .interaction-send:hover:not(:disabled) {
+            background: #45a049;
+        }
+        .interaction-send:disabled {
             background: #ccc;
             cursor: not-allowed;
         }
@@ -600,6 +666,7 @@
                 </div>
                 <div class="selection-actions">
                     <button id="cancelSelection" class="btn btn-secondary">Cancel</button>
+                    <button id="interactWithFlows" class="btn btn-success" disabled>Interact with my flows without analysing them first</button>
                     <button id="proceedWithSelection" class="btn btn-primary" disabled>Analyze Selected Flows</button>
                 </div>
             </div>
@@ -627,6 +694,24 @@
             <div class="chat-input-container">
                 <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question about your flows..." onkeypress="handleChatKeyPress(event)">
                 <button class="chat-send" id="chatSend" onclick="sendChatMessage()">Send</button>
+            </div>
+        </div>
+        
+        <div id="flowInteractionInterface" class="flow-interaction-interface" style="display: none;">
+            <div class="interaction-header">
+                <h2>Interact with Flow JSON</h2>
+                <p>Ask questions directly about the JSON data of your selected flows without formal analysis.</p>
+                <button class="btn btn-secondary" onclick="closeFlowInteraction()" style="float: right;">Close</button>
+                <div style="clear: both;"></div>
+            </div>
+            <div class="interaction-messages" id="interactionMessages">
+                <div class="chat-message ai">
+                    <strong>AI Assistant:</strong> I have access to the JSON data of your selected flows. Ask me anything about their structure, logic, elements, or configuration!
+                </div>
+            </div>
+            <div class="interaction-input-container">
+                <input type="text" class="interaction-input" id="interactionInput" placeholder="Ask about flow structure, elements, logic..." onkeypress="handleInteractionKeyPress(event)">
+                <button class="interaction-send" id="interactionSend" onclick="sendInteractionMessage()">Send</button>
             </div>
         </div>
     </div>
@@ -889,6 +974,36 @@
             });
             
             updateSelectedCount();
+            
+            // Restore previously selected flows from localStorage
+            restoreSelectedFlows();
+        }
+        
+        function restoreSelectedFlows() {
+            const savedSelections = localStorage.getItem('selectedFlows');
+            if (savedSelections) {
+                try {
+                    const savedFlowIds = JSON.parse(savedSelections);
+                    selectedFlows = [];
+                    
+                    savedFlowIds.forEach(flowId => {
+                        const flowItem = document.querySelector(`[data-flow-id="${flowId}"]`);
+                        if (flowItem) {
+                            const checkbox = flowItem.querySelector('input[type="checkbox"]');
+                            if (checkbox) {
+                                checkbox.checked = true;
+                                selectedFlows.push(flowId);
+                                flowItem.classList.add('selected');
+                            }
+                        }
+                    });
+                    
+                    updateSelectedCount();
+                } catch (error) {
+                    console.warn('Failed to restore selected flows from localStorage:', error);
+                    localStorage.removeItem('selectedFlows');
+                }
+            }
         }
         
         function createFlowItem(flow) {
@@ -946,6 +1061,8 @@
                 flowItem.classList.remove('selected');
             }
             
+            // Save selected flows to localStorage
+            localStorage.setItem('selectedFlows', JSON.stringify(selectedFlows));
             updateSelectedCount();
         }
         
@@ -953,6 +1070,7 @@
             const count = selectedFlows.length;
             document.getElementById('selectedCount').textContent = `${count} flow${count !== 1 ? 's' : ''} selected`;
             document.getElementById('proceedWithSelection').disabled = count === 0;
+            document.getElementById('interactWithFlows').disabled = count === 0;
         }
         
         function setupFlowSelectionEvents() {
@@ -986,6 +1104,10 @@
             
             document.getElementById('proceedWithSelection').addEventListener('click', () => {
                 proceedWithSelectedFlows();
+            });
+            
+            document.getElementById('interactWithFlows').addEventListener('click', () => {
+                startFlowInteraction();
             });
         }
         
@@ -1022,6 +1144,8 @@
                 }
             });
             
+            // Save selected flows to localStorage
+            localStorage.setItem('selectedFlows', JSON.stringify(selectedFlows));
             updateSelectedCount();
         }
         
@@ -1032,6 +1156,8 @@
                 checkbox.checked = false;
                 checkbox.closest('.flow-item').classList.remove('selected');
             });
+            // Save empty selection to localStorage
+            localStorage.setItem('selectedFlows', JSON.stringify(selectedFlows));
             updateSelectedCount();
         }
         
@@ -1287,6 +1413,7 @@
                 // Clear localStorage first
                 localStorage.removeItem('aiProvider');
                 localStorage.removeItem('aiApiKey');
+                localStorage.removeItem('selectedFlows');
                 
                 // Reset page state
                 flowsData = null;
@@ -1628,6 +1755,99 @@
             
             // NO FORMATTING AT ALL - just return clean text
             return message.trim();
+        }
+
+        // Flow Interaction Functions
+        function startFlowInteraction() {
+            if (selectedFlows.length === 0) {
+                alert('Please select at least one flow first.');
+                return;
+            }
+            
+            // Hide flow selection and show interaction interface
+            document.getElementById('flowSelection').style.display = 'none';
+            document.getElementById('flowInteractionInterface').style.display = 'block';
+            
+            // Clear previous messages except the initial AI message
+            const interactionMessages = document.getElementById('interactionMessages');
+            const firstMessage = interactionMessages.firstElementChild;
+            interactionMessages.innerHTML = '';
+            interactionMessages.appendChild(firstMessage);
+        }
+        
+        function closeFlowInteraction() {
+            document.getElementById('flowInteractionInterface').style.display = 'none';
+            document.getElementById('flowSelection').style.display = 'block';
+        }
+        
+        function handleInteractionKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendInteractionMessage();
+            }
+        }
+        
+        async function sendInteractionMessage() {
+            const input = document.getElementById('interactionInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message to chat
+            addInteractionMessage('user', message);
+            input.value = '';
+            
+            // Disable send button while processing
+            const sendButton = document.getElementById('interactionSend');
+            sendButton.disabled = true;
+            sendButton.textContent = 'Sending...';
+            
+            try {
+                // Get selected flows data
+                const selectedFlowsData = allFlows.filter(flow => selectedFlows.includes(flow.Id));
+                
+                // Send to backend
+                const response = await fetch('/api/chat/flows', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        flowsData: selectedFlowsData,
+                        aiProvider: localStorage.getItem('aiProvider'),
+                        apiKey: localStorage.getItem('apiKey')
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                addInteractionMessage('ai', data.response);
+                
+            } catch (error) {
+                console.error('Error sending flow interaction message:', error);
+                addInteractionMessage('ai', 'Sorry, I encountered an error processing your request. Please try again.');
+            } finally {
+                sendButton.disabled = false;
+                sendButton.textContent = 'Send';
+            }
+        }
+        
+        function addInteractionMessage(type, message) {
+            const interactionMessages = document.getElementById('interactionMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${type}`;
+            
+            if (type === 'user') {
+                messageDiv.innerHTML = `<strong>You:</strong> ${message}`;
+            } else {
+                messageDiv.innerHTML = `<strong>AI Assistant:</strong><br><br>${message}`;
+            }
+            
+            interactionMessages.appendChild(messageDiv);
+            interactionMessages.scrollTop = interactionMessages.scrollHeight;
         }
     </script>
 </body>

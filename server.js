@@ -36,13 +36,13 @@ let tempCredentials = {};
 // AI Analysis Prompt
 const AI_ANALYSIS_PROMPT = `You are a Salesforce Flow Analyst. Analyze ALL the provided flows and provide:
 
-## Organization Overview
+## Global overview of the selected flows
 Write a 100-150 word overview of the global flow architecture.
 
 ## Potential Risks  
 Identify risks like infinite loops, governor limits, data integrity issues.
 
-## Organization-wide Improvements
+## Global Improvements on the selected flows
 List improvement opportunities with benefits and implementation steps.
 
 ## Individual Flow Analysis
@@ -488,9 +488,9 @@ ${JSON.stringify(chunkData)}`;
     console.log('Generating organization-level analysis...');
     
     const orgSummary = createOrgSummaryForAnalysis(flowsData, allFlowAnalyses);
-    const orgAnalysisPrompt = `You are a Salesforce Flow Analyst. Analyze the organization-wide flow architecture and provide:
+    const orgAnalysisPrompt = `You are a Salesforce Flow Analyst. Analyze the global flow architecture and provide:
 
-## Organization Overview
+## Global overview of the selected flows
 Write a 100-150 word overview of the global flow architecture.
 
 ## Potential Risks & Concerns
@@ -498,7 +498,7 @@ For each risk, use this format:
 **[Risk Name]** - Description of the risk and its impact.
 More details about the risk.
 
-## Organization-wide Improvements
+## Global Improvements on the selected flows
 For each improvement, use this format:
 **[Improvement Name]**
     **Benefits:** List of benefits
@@ -508,14 +508,14 @@ For each improvement, use this format:
         3. Step three
 
 Requirements:
-- Focus on architectural and organizational patterns
+- Focus on architectural and global patterns
 - Make risk and improvement names bold and slightly larger
 - For risks: don't skip lines between items, but skip one line after each complete risk
 - For improvements: move Benefits and Steps sections right (tabbed), bold the section headers
 - Be specific about implementation steps
 - Make recommendations actionable for Salesforce admins
 
-Organization summary:
+Global summary:
 ${JSON.stringify(orgSummary)}`;
 
     try {
@@ -537,10 +537,10 @@ ${JSON.stringify(orgSummary)}`;
                 throw new Error('Unsupported AI provider');
         }
         
-        console.log(`Organization analysis length: ${orgAnalysis.length} characters`);
+        console.log(`Global analysis length: ${orgAnalysis.length} characters`);
         const orgResult = parseAIAnalysis(orgAnalysis, flowsData);
         
-        // Combine org-level analysis with detailed flow analyses
+        // Combine global-level analysis with detailed flow analyses
         return {
             organizationOverview: orgResult.organizationOverview,
             potentialRisks: orgResult.potentialRisks,
@@ -549,11 +549,11 @@ ${JSON.stringify(orgSummary)}`;
         };
         
     } catch (error) {
-        console.error('Error generating organization analysis:', error.message);
+        console.error('Error generating global analysis:', error.message);
         return {
-            organizationOverview: `This organization has ${flows.length} flows across various business processes. Detailed organizational analysis temporarily unavailable.`,
-            potentialRisks: 'Organizational risk analysis temporarily unavailable.',
-            organizationImprovements: 'Organizational improvement recommendations temporarily unavailable.',
+            organizationOverview: `This selection has ${flows.length} flows across various business processes. Detailed global analysis temporarily unavailable.`,
+            potentialRisks: 'Global risk analysis temporarily unavailable.',
+            organizationImprovements: 'Global improvement recommendations temporarily unavailable.',
             flowAnalysis: allFlowAnalyses
         };
     }
@@ -1337,7 +1337,7 @@ app.get('/auth/callback', async (req, res) => {
         
         if (error === 'OAUTH_AUTHORIZATION_BLOCKED') {
             errorMessage = `
-                <h2>Organization Configuration Required</h2>
+                <h2>Salesforce Configuration Required</h2>
                 <p><strong>Error:</strong> ${error_description}</p>
                 <p>This means you need to create a Connected App in the target Salesforce organization.</p>
                 <h3>Steps to fix:</h3>
@@ -1658,7 +1658,7 @@ app.post('/api/flows/chat', async (req, res) => {
 Question: ${question}
 
 Context from previous analysis:
-- Organization: ${flowSummary.orgAlias}
+- Org: ${flowSummary.orgAlias}
 - Total flows: ${flowSummary.totalFlows}
 - Flow types: ${JSON.stringify(flowSummary.flowTypes)}
 - Flow names: ${flowSummary.flowNames.join(', ')}
@@ -1690,6 +1690,80 @@ Please provide a detailed, helpful answer based on the flow analysis context abo
         
     } catch (error) {
         console.error('Chat error:', error);
+        
+        // Handle specific API overload errors
+        if (error.response?.status === 529) {
+            res.status(503).json({ 
+                error: 'AI service is temporarily overloaded. Please try again in a few minutes.',
+                statusCode: 529,
+                retryAfter: 30
+            });
+        } else if (error.response?.status === 400) {
+            res.status(400).json({ 
+                error: 'Invalid request. Please try rephrasing your question.',
+                statusCode: 400
+            });
+        } else {
+            res.status(500).json({ 
+                error: 'Failed to process question: ' + error.message,
+                statusCode: error.response?.status || 500
+            });
+        }
+    }
+});
+
+// Direct flow interaction endpoint for JSON exploration
+app.post('/api/chat/flows', async (req, res) => {
+    if (!connectionInfo.accessToken) {
+        return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { message, flowsData, aiProvider, apiKey } = req.body;
+    
+    if (!message || !flowsData || !aiProvider || !apiKey) {
+        return res.status(400).json({ error: 'Missing required parameters: message, flowsData, aiProvider, or apiKey' });
+    }
+
+    try {
+        // Create a direct interaction prompt for exploring flow JSON
+        const interactionPrompt = `You are a Salesforce Flow expert helping a user understand their flow JSON data. 
+
+User question: ${message}
+
+Flow data for analysis:
+${JSON.stringify(flowsData, null, 2)}
+
+Please provide a clear, helpful answer about the flow data. You can:
+- Explain flow structure and elements
+- Identify specific elements, variables, decisions, screens
+- Analyze flow logic and paths
+- Suggest improvements or point out potential issues
+- Answer questions about specific configuration values
+
+Keep your response conversational and practical. If the user asks about specific elements, reference them by name and explain their purpose.`;
+
+        let response;
+        switch (aiProvider) {
+            case 'openai':
+                response = await callOpenAI(apiKey, interactionPrompt);
+                break;
+            case 'claude':
+                response = await callClaude(apiKey, interactionPrompt);
+                break;
+            case 'mistral':
+                response = await callMistral(apiKey, interactionPrompt);
+                break;
+            case 'gemini':
+                response = await callGemini(apiKey, interactionPrompt);
+                break;
+            default:
+                throw new Error('Unsupported AI provider');
+        }
+
+        res.json({ response });
+        
+    } catch (error) {
+        console.error('Flow interaction error:', error);
         
         // Handle specific API overload errors
         if (error.response?.status === 529) {

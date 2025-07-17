@@ -147,19 +147,49 @@ async function callMistral(apiKey, prompt) {
 }
 
 async function callGemini(apiKey, prompt) {
-    const response = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
-        contents: [{
-            parts: [{
-                text: prompt
-            }]
-        }]
-    }, {
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    });
+    // Validate API key format
+    if (!apiKey || !apiKey.startsWith('AIza')) {
+        throw new Error('Invalid Gemini API key format. Key should start with "AIza". Get a valid key from Google AI Studio (makersuite.google.com).');
+    }
     
-    return response.data.candidates[0].content.parts[0].text;
+    try {
+        const response = await axios.post(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+            contents: [{
+                parts: [{
+                    text: prompt
+                }]
+            }],
+            generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 8000
+            }
+        }, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 60000 // 60 second timeout
+        });
+        
+        if (!response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+            throw new Error('Invalid response format from Gemini API');
+        }
+        
+        return response.data.candidates[0].content.parts[0].text;
+        
+    } catch (error) {
+        if (error.response?.status === 404) {
+            throw new Error('Gemini API endpoint not found. Please check your API key and ensure you have access to Gemini API. Get a valid key from Google AI Studio (makersuite.google.com).');
+        } else if (error.response?.status === 403) {
+            throw new Error('Gemini API access denied. Check your API key permissions and billing setup in Google AI Studio.');
+        } else if (error.response?.status === 429) {
+            throw new Error('Gemini API rate limit exceeded. Please wait a moment and try again.');
+        } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+            throw new Error('Network error connecting to Gemini API. Please check your internet connection.');
+        }
+        
+        // Re-throw the original error with additional context
+        throw new Error(`Gemini API error: ${error.message}`);
+    }
 }
 
 function compressFlowData(flowsData) {

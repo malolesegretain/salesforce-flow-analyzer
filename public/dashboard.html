@@ -1511,7 +1511,7 @@
                     helpText.innerHTML = '🔑 Get your API key from <a href="https://console.mistral.ai/" target="_blank">Mistral Console</a><br>Key format: starts with your account identifier';
                     break;
                 case 'gemini':
-                    helpText.innerHTML = '🔑 Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a><br>Key format: AIza...';
+                    helpText.innerHTML = '🔑 Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a><br>Key format: AIza...<br><small>⚠️ Must start with "AIza" - if you get 404 errors, verify your key format and regional availability</small>';
                     break;
                 default:
                     helpText.innerHTML = 'Select a provider above to see API key instructions';

@@ -691,16 +691,27 @@ function parseIndividualFlows(content, result, flowsData) {
             const flowName = flow.MasterLabel || flow.FullName;
             console.log(`Looking for flow: ${flowName}`);
             
+            // Create normalized patterns for both the actual flow name and AI-generated variants
+            const normalizedFlowName = flowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const underscoreVariant = flowName.replace(/\s*-\s*/g, '_').replace(/\s+/g, '_');
+            const cleanVariant = flowName.replace(/\s*-\s*/g, ' ').replace(/\s+/g, ' ');
+            
             // Multiple patterns to catch different AI response formats
             const patterns = [
-                // Standard ### header format
-                new RegExp(`###\\s*${flowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?(?=###|$)`, 'i'),
+                // Standard ### header format with exact name
+                new RegExp(`###\\s*${normalizedFlowName}[\\s\\S]*?(?=###|$)`, 'i'),
+                // Standard ### header format with underscore variant
+                new RegExp(`###\\s*${underscoreVariant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?(?=###|$)`, 'i'),
                 // Flow name as bold text
-                new RegExp(`\\*\\*${flowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*[\\s\\S]*?(?=\\*\\*Blue\\s*-|$)`, 'i'),
+                new RegExp(`\\*\\*${normalizedFlowName}\\*\\*[\\s\\S]*?(?=\\*\\*Blue|$)`, 'i'),
+                // Flow name with underscores as bold text
+                new RegExp(`\\*\\*${underscoreVariant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*[\\s\\S]*?(?=\\*\\*Blue|$)`, 'i'),
                 // Flow name followed by colon or line break
-                new RegExp(`${flowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[:\\s]*[\\s\\S]*?(?=Blue\\s*-|$)`, 'i'),
+                new RegExp(`${normalizedFlowName}[:\\s]*[\\s\\S]*?(?=Blue\\s*-|$)`, 'i'),
+                // Underscore variant followed by colon or line break
+                new RegExp(`${underscoreVariant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[:\\s]*[\\s\\S]*?(?=Blue|$)`, 'i'),
                 // Numbered format like "1. Flow Name"
-                new RegExp(`\\d+\\.\\s*${flowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?(?=\\d+\\.\\s*Blue\\s*-|$)`, 'i')
+                new RegExp(`\\d+\\.\\s*${normalizedFlowName}[\\s\\S]*?(?=\\d+\\.\\s*Blue|$)`, 'i')
             ];
             
             for (const pattern of patterns) {
@@ -735,15 +746,31 @@ function parseIndividualFlows(content, result, flowsData) {
         // Extract flow name from various possible formats
         const namePatterns = [
             /^###\s*(.+?)$/m,
-            /^\*\*(Blue\s*-[^*]+)\*\*/m,
-            /^(Blue\s*-[^\n\r]+)/m,
-            /^\d+\.\s*(Blue\s*-[^\n\r]+)/m
+            /^\*\*(Blue[^*]+)\*\*/m,
+            /^(Blue[^\n\r]+)/m,
+            /^\d+\.\s*(Blue[^\n\r]+)/m
         ];
         
         for (const pattern of namePatterns) {
             const headerMatch = trimmed.match(pattern);
             if (headerMatch) {
-                flowName = headerMatch[1].replace(/^\d+\.\s*/, '').trim();
+                let extractedName = headerMatch[1].replace(/^\d+\.\s*/, '').trim();
+                
+                // Convert underscore variant back to proper flow name
+                if (extractedName.includes('_')) {
+                    // Try to match against actual flow names
+                    const actualFlow = flowsData.flows.find(flow => {
+                        const flowName = flow.MasterLabel || flow.FullName;
+                        const underscoreVariant = flowName.replace(/\s*-\s*/g, '_').replace(/\s+/g, '_');
+                        return extractedName === underscoreVariant;
+                    });
+                    
+                    if (actualFlow) {
+                        extractedName = actualFlow.MasterLabel || actualFlow.FullName;
+                    }
+                }
+                
+                flowName = extractedName;
                 flowContent = trimmed.substring(headerMatch.index + headerMatch[0].length).trim();
                 break;
             }

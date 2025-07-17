@@ -1823,30 +1823,125 @@
                     return;
                 }
                 
-                // Check data size and truncate if necessary (limit to ~50KB to avoid API limits)
-                const dataString = JSON.stringify(selectedFlowsData);
-                const maxSize = 50000; // 50KB limit
-                let flowsToSend = selectedFlowsData;
+                // Get provider-specific size limits (in characters, conservative estimates)
+                const providerLimits = {
+                    'openai': 400000,    // ~400KB (safe margin from 500KB+ capacity)
+                    'claude': 600000,    // ~600KB (safe margin from 800KB+ capacity)
+                    'gemini': 2000000,   // ~2MB (safe margin from 4MB+ capacity)
+                    'mistral': 100000    // ~100KB (safe margin from 128KB+ capacity)
+                };
                 
-                if (dataString.length > maxSize) {
-                    console.log(`Flow data too large (${dataString.length} chars), truncating...`);
-                    // Send only essential flow information if too large
-                    flowsToSend = selectedFlowsData.map(flow => ({
-                        Id: flow.Id,
-                        MasterLabel: flow.MasterLabel,
-                        Status: flow.Status,
-                        ProcessType: flow.ProcessType,
-                        ApiVersion: flow.ApiVersion,
-                        Description: flow.Description,
-                        // Include only a subset of metadata to reduce size
-                        Metadata: flow.Metadata ? {
-                            processType: flow.Metadata.processType,
-                            startElementReference: flow.Metadata.startElementReference,
-                            variables: flow.Metadata.variables ? flow.Metadata.variables.slice(0, 5) : undefined
-                        } : undefined
-                    }));
+                const maxSize = providerLimits[aiProvider] || 100000; // Default to 100KB if provider unknown
+                const originalDataString = JSON.stringify(selectedFlowsData);
+                let flowsToSend = selectedFlowsData;
+                let truncationApplied = false;
+                
+                console.log(`Flow data size: ${originalDataString.length} chars, limit: ${maxSize} chars for ${aiProvider}`);
+                
+                if (originalDataString.length > maxSize) {
+                    console.log(`Flow data too large (${originalDataString.length} chars), applying progressive truncation...`);
                     
-                    addInteractionMessage('ai', 'Note: Flow data was truncated to fit size limits. Some detailed metadata may not be available.');
+                    // Progressive truncation strategy - preserve most important flow data
+                    flowsToSend = selectedFlowsData.map(flow => {
+                        if (!flow.Metadata) return flow;
+                        
+                        // Level 1: Truncate long text fields only
+                        const truncatedFlow = {
+                            ...flow,
+                            Description: flow.Description && flow.Description.length > 500 ? 
+                                flow.Description.substring(0, 500) + '...' : flow.Description,
+                            Metadata: {
+                                ...flow.Metadata,
+                                // Preserve all flow elements - these are crucial for understanding flow logic
+                                decisions: flow.Metadata.decisions,
+                                processMetadataValues: flow.Metadata.processMetadataValues,
+                                recordCreates: flow.Metadata.recordCreates,
+                                recordUpdates: flow.Metadata.recordUpdates,
+                                recordLookups: flow.Metadata.recordLookups,
+                                screens: flow.Metadata.screens,
+                                assignments: flow.Metadata.assignments,
+                                variables: flow.Metadata.variables,
+                                constants: flow.Metadata.constants,
+                                formulas: flow.Metadata.formulas,
+                                subflows: flow.Metadata.subflows,
+                                actionCalls: flow.Metadata.actionCalls,
+                                loops: flow.Metadata.loops,
+                                waits: flow.Metadata.waits,
+                                // Keep essential process info
+                                processType: flow.Metadata.processType,
+                                startElementReference: flow.Metadata.startElementReference,
+                                apiVersion: flow.Metadata.apiVersion,
+                                status: flow.Metadata.status,
+                                // Truncate less critical system metadata
+                                description: flow.Metadata.description && flow.Metadata.description.length > 300 ? 
+                                    flow.Metadata.description.substring(0, 300) + '...' : flow.Metadata.description
+                            }
+                        };
+                        
+                        return truncatedFlow;
+                    });
+                    
+                    // Check if Level 1 truncation was sufficient
+                    const level1Size = JSON.stringify(flowsToSend).length;
+                    console.log(`After Level 1 truncation: ${level1Size} chars`);
+                    
+                    if (level1Size > maxSize) {
+                        console.log('Level 1 truncation insufficient, applying Level 2...');
+                        // Level 2: Remove system metadata but keep all flow elements
+                        flowsToSend = flowsToSend.map(flow => ({
+                            ...flow,
+                            Metadata: flow.Metadata ? {
+                                // Keep all flow elements - these are essential
+                                decisions: flow.Metadata.decisions,
+                                processMetadataValues: flow.Metadata.processMetadataValues,
+                                recordCreates: flow.Metadata.recordCreates,
+                                recordUpdates: flow.Metadata.recordUpdates,
+                                recordLookups: flow.Metadata.recordLookups,
+                                screens: flow.Metadata.screens,
+                                assignments: flow.Metadata.assignments,
+                                variables: flow.Metadata.variables,
+                                constants: flow.Metadata.constants,
+                                formulas: flow.Metadata.formulas,
+                                subflows: flow.Metadata.subflows,
+                                actionCalls: flow.Metadata.actionCalls,
+                                loops: flow.Metadata.loops,
+                                waits: flow.Metadata.waits,
+                                processType: flow.Metadata.processType,
+                                startElementReference: flow.Metadata.startElementReference
+                            } : undefined
+                        }));
+                        
+                        const level2Size = JSON.stringify(flowsToSend).length;
+                        console.log(`After Level 2 truncation: ${level2Size} chars`);
+                        
+                        if (level2Size > maxSize) {
+                            console.log('Level 2 truncation insufficient, applying Level 3...');
+                            // Level 3: Limit array elements (last resort)
+                            flowsToSend = flowsToSend.map(flow => ({
+                                ...flow,
+                                Metadata: flow.Metadata ? {
+                                    processType: flow.Metadata.processType,
+                                    startElementReference: flow.Metadata.startElementReference,
+                                    variables: flow.Metadata.variables ? flow.Metadata.variables.slice(0, 10) : undefined,
+                                    decisions: flow.Metadata.decisions ? flow.Metadata.decisions.slice(0, 5) : undefined,
+                                    screens: flow.Metadata.screens ? flow.Metadata.screens.slice(0, 5) : undefined,
+                                    assignments: flow.Metadata.assignments ? flow.Metadata.assignments.slice(0, 10) : undefined,
+                                    recordCreates: flow.Metadata.recordCreates ? flow.Metadata.recordCreates.slice(0, 5) : undefined,
+                                    recordUpdates: flow.Metadata.recordUpdates ? flow.Metadata.recordUpdates.slice(0, 5) : undefined
+                                } : undefined
+                            }));
+                        }
+                    }
+                    
+                    truncationApplied = true;
+                    const finalSize = JSON.stringify(flowsToSend).length;
+                    console.log(`Final flow data size: ${finalSize} chars`);
+                    
+                    if (truncationApplied) {
+                        addInteractionMessage('ai', `Note: Flow data was optimized for ${aiProvider} (${originalDataString.length} → ${finalSize} chars). Most flow elements preserved.`);
+                    }
+                } else {
+                    console.log(`Flow data fits within ${aiProvider} limits, no truncation needed.`);
                 }
                 
                 // Send to backend

@@ -1720,7 +1720,15 @@ app.post('/api/chat/flows', async (req, res) => {
 
     const { message, flowsData, aiProvider, apiKey } = req.body;
     
+    console.log(`Flow interaction request - Provider: ${aiProvider}, Flows: ${flowsData?.length || 0}, Message length: ${message?.length || 0}`);
+    
     if (!message || !flowsData || !aiProvider || !apiKey) {
+        console.log('Missing required parameters:', { 
+            hasMessage: !!message, 
+            hasFlowsData: !!flowsData, 
+            hasAiProvider: !!aiProvider, 
+            hasApiKey: !!apiKey 
+        });
         return res.status(400).json({ error: 'Missing required parameters: message, flowsData, aiProvider, or apiKey' });
     }
 
@@ -1742,6 +1750,8 @@ Please provide a clear, helpful answer about the flow data. You can:
 
 Keep your response conversational and practical. If the user asks about specific elements, reference them by name and explain their purpose.`;
 
+        console.log(`Calling ${aiProvider} with prompt length: ${interactionPrompt.length} characters`);
+        
         let response;
         switch (aiProvider) {
             case 'openai':
@@ -1757,13 +1767,21 @@ Keep your response conversational and practical. If the user asks about specific
                 response = await callGemini(apiKey, interactionPrompt);
                 break;
             default:
+                console.error('Unsupported AI provider:', aiProvider);
                 throw new Error('Unsupported AI provider');
         }
 
+        console.log(`${aiProvider} response received, length: ${response?.length || 0} characters`);
         res.json({ response });
         
     } catch (error) {
-        console.error('Flow interaction error:', error);
+        console.error('Flow interaction error:', {
+            message: error.message,
+            status: error.response?.status,
+            provider: aiProvider,
+            hasApiKey: !!apiKey,
+            flowsCount: flowsData?.length
+        });
         
         // Handle specific API overload errors
         if (error.response?.status === 529) {

@@ -1802,8 +1802,52 @@
             sendButton.textContent = 'Sending...';
             
             try {
+                // Validate AI configuration
+                const aiProvider = localStorage.getItem('aiProvider');
+                const apiKey = localStorage.getItem('aiApiKey');
+                
+                if (!aiProvider || !apiKey) {
+                    addInteractionMessage('ai', 'Please configure your AI settings first. Click the "Configure AI" button in the header.');
+                    sendButton.disabled = false;
+                    sendButton.textContent = 'Send';
+                    return;
+                }
+                
                 // Get selected flows data
                 const selectedFlowsData = allFlows.filter(flow => selectedFlows.includes(flow.Id));
+                
+                if (selectedFlowsData.length === 0) {
+                    addInteractionMessage('ai', 'No flows are selected. Please select some flows first.');
+                    sendButton.disabled = false;
+                    sendButton.textContent = 'Send';
+                    return;
+                }
+                
+                // Check data size and truncate if necessary (limit to ~50KB to avoid API limits)
+                const dataString = JSON.stringify(selectedFlowsData);
+                const maxSize = 50000; // 50KB limit
+                let flowsToSend = selectedFlowsData;
+                
+                if (dataString.length > maxSize) {
+                    console.log(`Flow data too large (${dataString.length} chars), truncating...`);
+                    // Send only essential flow information if too large
+                    flowsToSend = selectedFlowsData.map(flow => ({
+                        Id: flow.Id,
+                        MasterLabel: flow.MasterLabel,
+                        Status: flow.Status,
+                        ProcessType: flow.ProcessType,
+                        ApiVersion: flow.ApiVersion,
+                        Description: flow.Description,
+                        // Include only a subset of metadata to reduce size
+                        Metadata: flow.Metadata ? {
+                            processType: flow.Metadata.processType,
+                            startElementReference: flow.Metadata.startElementReference,
+                            variables: flow.Metadata.variables ? flow.Metadata.variables.slice(0, 5) : undefined
+                        } : undefined
+                    }));
+                    
+                    addInteractionMessage('ai', 'Note: Flow data was truncated to fit size limits. Some detailed metadata may not be available.');
+                }
                 
                 // Send to backend
                 const response = await fetch('/api/chat/flows', {
@@ -1813,9 +1857,9 @@
                     },
                     body: JSON.stringify({
                         message: message,
-                        flowsData: selectedFlowsData,
-                        aiProvider: localStorage.getItem('aiProvider'),
-                        apiKey: localStorage.getItem('apiKey')
+                        flowsData: flowsToSend,
+                        aiProvider: aiProvider,
+                        apiKey: apiKey
                     })
                 });
                 
@@ -1828,7 +1872,21 @@
                 
             } catch (error) {
                 console.error('Error sending flow interaction message:', error);
-                addInteractionMessage('ai', 'Sorry, I encountered an error processing your request. Please try again.');
+                
+                // Provide specific error messages based on error type
+                let errorMessage = 'Sorry, I encountered an error processing your request. Please try again.';
+                
+                if (error.message.includes('HTTP error! status: 401')) {
+                    errorMessage = 'Authentication failed. Please log in again.';
+                } else if (error.message.includes('HTTP error! status: 400')) {
+                    errorMessage = 'Invalid request. Please check your AI configuration and try again.';
+                } else if (error.message.includes('HTTP error! status: 503') || error.message.includes('HTTP error! status: 529')) {
+                    errorMessage = 'AI service is temporarily overloaded. Please try again in a few minutes.';
+                } else if (error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Network error. Please check your connection and try again.';
+                }
+                
+                addInteractionMessage('ai', errorMessage);
             } finally {
                 sendButton.disabled = false;
                 sendButton.textContent = 'Send';
